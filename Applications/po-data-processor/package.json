@@ -1,0 +1,19 @@
+{
+  "name": "po-data-processor",
+  "version": "1.0.0",
+  "description": "A 100% client-side web application for processing Purchase Order PDFs and merging vendor data. All processing happens in your browser - your data never leaves your computer.",
+  "keywords": [
+    "pdf",
+    "excel",
+    "purchase-order",
+    "client-side",
+    "browser"
+  ],
+  "author": "rmhyuen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rmhyuen/TurtleKing"
+  },
+  "homepage": "https://rmhyuen.github.io/TurtleKing/apps/po-data-processor/"
+}

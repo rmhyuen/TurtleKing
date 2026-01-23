@@ -1,0 +1,35 @@
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Output and Temp Files
+*.xlsx
+*.xls
+test-output.*
+dist/
+build/
+out/
+temp/
+tmp/
+*.tmp
+*.log
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db

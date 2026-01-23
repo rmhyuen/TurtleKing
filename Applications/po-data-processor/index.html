@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PO Data Processor</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>PO Data Processor</h1>
+
+    <!-- Hidden folder input for customer PDFs -->
+    <input type="file" id="file-input" name="pdfs" multiple webkitdirectory accept="application/pdf" style="display: none;" />
+    
+    <!-- Hidden file inputs for vendor merge -->
+    <input type="file" id="customer-excel-input" accept=".xlsx" style="display: none;" />
+    <input type="file" id="vendor-data-input" accept=".csv,.xlsx" style="display: none;" />
+
+    <!-- Two main buttons -->
+    <button id="customer-btn" class="main-btn customer-btn">Import & Process Customer Data</button>
+    <button id="vendor-btn" class="main-btn vendor-btn">Import & Process Vendor Data</button>
+
+    <!-- Status message -->
+    <div id="status" class="status"></div>
+
+    <!-- Result panel -->
+    <div id="result-panel" class="result-panel">
+      <div id="result-link"></div>
+    </div>
+  </div>
+
+  <!-- PDF.js library for PDF parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  
+  <!-- ExcelJS library for Excel file generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  
+  <!-- Verify libraries loaded -->
+  <script>
+    if (typeof window.pdfjsLib === 'undefined') {
+      document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Error: PDF.js library failed to load</h1><p>Please check your internet connection and refresh the page.</p></div>';
+    }
+    if (typeof window.ExcelJS === 'undefined') {
+      document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Error: ExcelJS library failed to load</h1><p>Please check your internet connection and refresh the page.</p></div>';
+    }
+  </script>
+  
+  <!-- Client-side converter (PDF parsing and Excel generation) -->
+  <script src="./js/converter.js"></script>
+  
+  <!-- Main application logic -->
+  <script src="./js/app.js"></script>
+</body>
+</html>
