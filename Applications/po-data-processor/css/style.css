@@ -101,6 +101,16 @@ h1 {
   box-shadow: 0 3px 6px rgba(0,0,0,0.3);
 }
 
+.combined-btn {
+  background: #FF9800;
+  color: #FFFFFF;
+}
+
+.combined-btn:hover:not(:disabled) {
+  background: #F57C00;
+  box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+}
+
 .main-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;

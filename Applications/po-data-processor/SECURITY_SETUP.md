@@ -13,8 +13,6 @@ The app now uses **browser localStorage** for API key management. **No config fi
 2. **A setup dialog appears** automatically asking for your API key
 
 3. **Enter your API key:**
-   - Default: `925fdcb3-219b-418d-b745-a1a68e6f78ca`
-   - Or use your own if you've changed it
 
 4. **Click "Save & Continue"**
 

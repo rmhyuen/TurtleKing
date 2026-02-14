@@ -154,9 +154,16 @@ const SETUP = {
   },
   
   /**
-   * Show settings/configuration panel
+   * Show settings/configuration panel (toggle open/close)
    */
   showSettings() {
+    // Check if settings modal is already open
+    const existingModal = document.getElementById('settings-modal');
+    if (existingModal) {
+      existingModal.remove();
+      return;
+    }
+    
     const currentKey = this.getApiKey();
     const masked = currentKey ? currentKey.substring(0, 8) + '...' + currentKey.substring(currentKey.length - 4) : 'not set';
     
