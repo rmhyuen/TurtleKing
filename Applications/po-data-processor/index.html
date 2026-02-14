@@ -8,7 +8,10 @@
 </head>
 <body>
   <div class="container">
-    <h1>PO Data Processor</h1>
+    <div class="header-top">
+      <h1>PO Data Processor</h1>
+      <button id="settings-btn" class="settings-btn" title="Settings">⚙️</button>
+    </div>
 
     <!-- Hidden folder input for customer PDFs -->
     <input type="file" id="file-input" name="pdfs" multiple webkitdirectory accept="application/pdf" style="display: none;" />
@@ -45,6 +48,9 @@
       document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Error: ExcelJS library failed to load</h1><p>Please check your internet connection and refresh the page.</p></div>';
     }
   </script>
+  
+  <!-- Configuration and Setup (localStorage-based, no config file needed) -->
+  <script src="./js/setup.js"></script>
   
   <!-- Client-side converter (PDF parsing and Excel generation) -->
   <script src="./js/converter.js"></script>

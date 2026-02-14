@@ -11,10 +11,14 @@ Thumbs.db
 node_modules/
 package-lock.json
 
-# Environment
+# Environment and Security
 .env
 .env.local
 .env.*.local
+secrets/
+*.key
+*.pem
+GoogleAppsScript_Template.gs
 
 # Output and Temp Files
 *.xlsx

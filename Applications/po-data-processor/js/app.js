@@ -5,6 +5,7 @@
 
 const customerBtn = document.getElementById('customer-btn');
 const vendorBtn = document.getElementById('vendor-btn');
+const settingsBtn = document.getElementById('settings-btn');
 const fileInput = document.getElementById('file-input');
 const customerExcelInput = document.getElementById('customer-excel-input');
 const vendorDataInput = document.getElementById('vendor-data-input');
@@ -14,6 +15,21 @@ const resultLink = document.getElementById('result-link');
 
 let processedBlob = null;
 let processedFileName = 'merged-output.xlsx';
+let currentTimestamp = '';
+
+/**
+ * Generate timestamp in YYYYMMDD_HHMMSS format
+ */
+function generateTimestamp() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+}
 
 // State for vendor merge workflow
 let vendorMergeState = {
@@ -72,51 +88,52 @@ customerBtn.addEventListener('click', () => {
 });
 
 /**
- * Handle vendor data button click - start vendor merge workflow
+ * Handle settings button click
  */
-vendorBtn.addEventListener('click', () => {
-  // Reset vendor merge state
-  vendorMergeState = { customerFile: null, vendorFile: null };
-  showStatus('Step 1/2: Select Customer Excel file.', 'info');
-  customerExcelInput.click();
+settingsBtn.addEventListener('click', () => {
+  SETUP.showSettings();
 });
 
 /**
- * Handle customer Excel file selection for vendor merge
+ * Handle vendor data button click - fetch customer and vendor data automatically
  */
-customerExcelInput.addEventListener('change', () => {
-  if (!customerExcelInput.files || customerExcelInput.files.length === 0) {
-    customerExcelInput.value = '';
-    return;
+vendorBtn.addEventListener('click', async () => {
+  showStatus('Fetching customer data from Google Drive...', 'loading');
+  resultPanel.classList.remove('show');
+  customerBtn.disabled = true;
+  vendorBtn.disabled = true;
+  
+  try {
+    // Fetch both customer and vendor data from Google Drive
+    const customerData = await fetchCustomerDataFromDrive();
+    if (!customerData) {
+      showStatus('Error: Could not fetch customer data from Google Drive', 'error');
+      return;
+    }
+    
+    showStatus('Fetching vendor data from Google Drive...', 'loading');
+    
+    const vendorData = await fetchVendorDataFromDrive();
+    if (!vendorData) {
+      showStatus('Error: Could not fetch vendor data from Google Drive', 'error');
+      return;
+    }
+    
+    vendorMergeState.customerFile = customerData;
+    vendorMergeState.vendorFile = vendorData;
+    
+    showStatus('Merging customer and vendor data...', 'loading');
+    
+    // Proceed with merge automatically
+    await performVendorMerge();
+    
+  } catch (err) {
+    console.error('Error:', err);
+    showStatus(`Error: ${err.message}`, 'error');
+  } finally {
+    customerBtn.disabled = false;
+    vendorBtn.disabled = false;
   }
-  
-  vendorMergeState.customerFile = customerExcelInput.files[0];
-  
-  // Remember this folder
-  PathMemory.save(PathMemory.keys.lastCustomerExcel, 'Customer Excel folder');
-  
-  customerExcelInput.value = '';
-  
-  // Show button for step 2 - browser requires direct user click for file picker
-  showStatus(`Step 2/2: Now select the Vendor Data file`, 'info');
-  resultLink.innerHTML = `
-    <button id="select-vendor-btn" style="
-      background: #2196F3;
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 16px;
-      width: 100%;
-    ">Select Vendor Data File (CSV or Excel)</button>
-  `;
-  resultPanel.classList.add('show');
-  
-  document.getElementById('select-vendor-btn').addEventListener('click', () => {
-    vendorDataInput.click();
-  });
 });
 
 /**
@@ -166,25 +183,13 @@ vendorDataInput.addEventListener('change', async () => {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
     
-    // Generate output filename
+    // Generate output filename with timestamp
+    currentTimestamp = generateTimestamp();
     const baseName = vendorMergeState.customerFile.name.replace(/\.xlsx$/i, '');
-    processedFileName = `${baseName}_merged.xlsx`;
+    processedFileName = `${baseName}_${currentTimestamp}.xlsx`;
     
-    resultLink.innerHTML = `
-      <button id="select-output-btn" style="
-        background: #1f6feb;
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 16px;
-        width: 100%;
-      ">Select Output File</button>
-    `;
-    resultPanel.classList.add('show');
-    showStatus(`✓ Vendor data merged successfully. Choose where to save the Excel file.`, 'success');
+    resultPanel.classList.remove('show');
+    showStatus(`✓ Vendor data merged successfully. Uploading to Google Drive...`, 'success');
     
     setupOutputButton();
     
@@ -231,23 +236,12 @@ fileInput.addEventListener('change', async () => {
     processedBlob = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
-    processedFileName = 'merged-output.xlsx';
+    // Generate filename with timestamp
+    currentTimestamp = generateTimestamp();
+    processedFileName = `CustomerData_${currentTimestamp}.xlsx`;
     
-    resultLink.innerHTML = `
-      <button id="select-output-btn" style="
-        background: #1f6feb;
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 16px;
-        width: 100%;
-      ">Select Output File</button>
-    `;
-    resultPanel.classList.add('show');
-    showStatus(`✓ Processed ${files.length} PDF file(s). Choose where to save the Excel file.`, 'success');
+    resultPanel.classList.remove('show');
+    showStatus(`✓ Processed ${files.length} PDF file(s). Uploading to Google Drive...`, 'success');
     
     setupOutputButton();
     
@@ -262,58 +256,352 @@ fileInput.addEventListener('change', async () => {
 });
 
 /**
- * Setup the output file save button with Save As dialog
+ * Automatically upload processed file to Google Drive
  */
-function setupOutputButton() {
-  const selectBtn = document.getElementById('select-output-btn');
-  selectBtn.addEventListener('click', async () => {
-    const desiredName = processedFileName || 'merged-output.xlsx';
-    try {
-      // Try File System Access API for Save As dialog (Chrome/Edge)
-      if (window.showSaveFilePicker) {
-        const handle = await window.showSaveFilePicker({
-          suggestedName: desiredName,
-          types: [
-            {
-              description: 'Excel Workbook',
-              accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
-            }
-          ]
-        });
-        const writable = await handle.createWritable();
-        await writable.write(processedBlob);
-        await writable.close();
-        showStatus(`✓ Saved as ${handle.name}`, 'success');
-        clearOutputButton();
-        return;
-      }
-      
-      // Legacy IE support
-      if (navigator.msSaveOrOpenBlob) {
-        navigator.msSaveOrOpenBlob(processedBlob, desiredName);
-        showStatus(`✓ Saved as ${desiredName}`, 'success');
-        clearOutputButton();
-        return;
-      }
-
-      // Fallback: auto-download
-      const url = URL.createObjectURL(processedBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = desiredName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      showStatus(`✓ Download started as ${desiredName}`, 'success');
-      clearOutputButton();
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        // User cancelled - not an error
-        return;
-      }
-      console.error('Save error:', err);
-      showStatus(`Error saving file: ${err.message || err}`, 'error');
+async function setupOutputButton() {
+  try {
+    // Upload to Google Drive automatically
+    showStatus(`Uploading to Google Drive...`, 'loading');
+    
+    const uploadSuccess = await uploadToGoogleDrive(processedBlob, currentTimestamp);
+    
+    if (!uploadSuccess) {
+      showStatus(`Error: Could not upload to Google Drive. Please try again.`, 'error');
+      return;
     }
+    
+    const desiredName = processedFileName || 'merged-output.xlsx';
+    
+    // Show success and offer download option
+    resultLink.innerHTML = `
+      <button id="download-btn" style="
+        background: #1f6feb;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 16px;
+        width: 100%;
+      ">Download Locally (Optional)</button>
+    `;
+    resultPanel.classList.add('show');
+    showStatus(`✓ Uploaded to Google Drive. Optionally download a local copy.`, 'success');
+    
+    document.getElementById('download-btn').addEventListener('click', async () => {
+      await saveLocally(desiredName);
+    });
+    
+  } catch (err) {
+    console.error('Error:', err);
+    showStatus(`Error: ${err.message || err}`, 'error');
+  }
+}
+
+/**
+ * Fetch customer data from Google Drive (latest from CustomerDataOnly folder)
+ */
+async function fetchCustomerDataFromDrive() {
+  try {
+    const response = await fetch(`${CONFIG.scriptUrl}?action=download-customer-data-only&apiKey=${CONFIG.apiKey}`);
+    
+    if (!response.ok) {
+      console.error('HTTP Error:', response.status, response.statusText);
+      return null;
+    }
+    
+    const result = await response.json();
+    
+    if (!result.success) {
+      console.error('Error from server:', result.error);
+      return null;
+    }
+    
+    const data = result.data;
+    
+    // Convert base64 to blob and then to File
+    const binaryString = atob(data.data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const file = new File([blob], data.fileName, { type: blob.type });
+    
+    return file;
+  } catch (err) {
+    console.error('Fetch customer data error:', err);
+    return null;
+  }
+}
+
+/**
+ * Fetch vendor data from Google Drive
+ */
+async function fetchVendorDataFromDrive() {
+  try {
+    const response = await fetch(`${CONFIG.scriptUrl}?action=download-vendor-file&apiKey=${CONFIG.apiKey}`);
+    
+    if (!response.ok) {
+      console.error('HTTP Error:', response.status, response.statusText);
+      return null;
+    }
+    
+    const result = await response.json();
+    
+    if (!result.success) {
+      console.error('Error from server:', result.error);
+      return null;
+    }
+    
+    const data = result.data;
+    
+    // Convert base64 to blob and then to File
+    const binaryString = atob(data.data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const file = new File([blob], data.fileName, { type: blob.type });
+    
+    return file;
+  } catch (err) {
+    console.error('Fetch vendor data error:', err);
+    return null;
+  }
+}
+
+/**
+ * Perform vendor merge with downloaded vendor file
+ */
+async function performVendorMerge() {
+  try {
+    // Validate we have both files
+    if (!vendorMergeState.customerFile || !vendorMergeState.vendorFile) {
+      showStatus('Error: Missing files. Please try again.', 'error');
+      return;
+    }
+    
+    customerBtn.disabled = true;
+    vendorBtn.disabled = true;
+    
+    // Read files as ArrayBuffer
+    const customerBuffer = await vendorMergeState.customerFile.arrayBuffer();
+    const vendorBuffer = await vendorMergeState.vendorFile.arrayBuffer();
+    
+    // Use client-side converter
+    const mergedWorkbook = await window.POConverter.mergeVendorData(
+      customerBuffer,
+      vendorBuffer,
+      vendorMergeState.vendorFile.name
+    );
+    
+    // Convert workbook to blob
+    const buffer = await mergedWorkbook.xlsx.writeBuffer();
+    processedBlob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    
+    // Generate output filename with timestamp
+    currentTimestamp = generateTimestamp();
+    processedFileName = `CustomerAndVendorData_${currentTimestamp}.xlsx`;
+    
+    // Automatically upload to Google Drive
+    showStatus('Uploading merged data to Google Drive...', 'loading');
+    const uploadSuccess = await uploadMergedDataToDrive(processedBlob, currentTimestamp);
+    
+    if (!uploadSuccess) {
+      showStatus('Error: Could not upload merged data to Google Drive.', 'error');
+      return;
+    }
+    
+    // Show success and download option
+    resultLink.innerHTML = `
+      <button id="download-btn" style="
+        background: #1f6feb;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 16px;
+        width: 100%;
+      ">Download Locally (Optional)</button>
+    `;
+    resultPanel.classList.add('show');
+    showStatus(`✓ Uploaded merged data to Google Drive. Optionally download a local copy.`, 'success');
+    
+    document.getElementById('download-btn').addEventListener('click', async () => {
+      await saveLocally(processedFileName);
+    });
+    
+  } catch (err) {
+    console.error('Error:', err);
+    showStatus(`Error: ${err.message}`, 'error');
+  } finally {
+    customerBtn.disabled = false;
+    vendorBtn.disabled = false;
+  }
+}
+
+/**
+ * Upload merged customer and vendor data to Google Drive
+ */
+async function uploadMergedDataToDrive(blob, timestamp) {
+  try {
+    const base64Data = await blobToBase64(blob);
+    
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      
+      xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          console.log('Upload successful');
+          resolve(true);
+        } else {
+          console.error('Upload failed with status:', xhr.status);
+          reject(new Error(`Upload failed: ${xhr.status}`));
+        }
+      };
+      
+      xhr.onerror = function() {
+        console.error('Upload error');
+        reject(new Error('Upload request failed'));
+      };
+      
+      xhr.open('POST', `${CONFIG.scriptUrl}?apiKey=${CONFIG.apiKey}`, true);
+      
+      const payload = new FormData();
+      payload.append('action', 'upload-merged-customer-vendor-data');
+      payload.append('fileName', 'CustomerAndVendorData');
+      payload.append('timestamp', timestamp);
+      payload.append('data', base64Data);
+      
+      xhr.send(payload);
+    });
+    
+  } catch (err) {
+    console.error('Upload error:', err);
+    return false;
+  }
+}
+
+/**
+ * Upload file to Google Drive
+ */
+async function uploadToGoogleDrive(blob, timestamp) {
+  try {
+    // Get base64 encoded data
+    const base64Data = await blobToBase64(blob);
+    
+    // Call Google Apps Script deployment endpoint via XMLHttpRequest
+    // Note: Replace this URL with your deployed Apps Script URL
+    
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      
+      xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          console.log('Upload successful');
+          resolve(true);
+        } else {
+          console.error('Upload failed with status:', xhr.status);
+          reject(new Error(`Upload failed: ${xhr.status}`));
+        }
+      };
+      
+      xhr.onerror = function() {
+        console.error('Upload error');
+        reject(new Error('Upload request failed'));
+      };
+      
+      xhr.open('POST', `${CONFIG.scriptUrl}?apiKey=${CONFIG.apiKey}`, true);
+      
+      const payload = new FormData();
+      payload.append('action', 'upload-processed-customer-data');
+      payload.append('fileName', 'CustomerData');
+      payload.append('timestamp', timestamp);
+      payload.append('data', base64Data);
+      
+      xhr.send(payload);
+    });
+    
+  } catch (err) {
+    console.error('Upload error:', err);
+    return false;
+  }
+}
+/**
+ * Convert blob to Base64
+ */
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      // Remove data:application/...;base64, prefix
+      const base64 = reader.result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
   });
 }
+
+/**
+ * Save file locally
+ */
+async function saveLocally(desiredName) {
+  try {
+    // Try File System Access API for Save As dialog (Chrome/Edge)
+    if (window.showSaveFilePicker) {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: desiredName,
+        types: [
+          {
+            description: 'Excel Workbook',
+            accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] }
+          }
+        ]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(processedBlob);
+      await writable.close();
+      showStatus(`✓ Saved locally as ${handle.name}`, 'success');
+      clearOutputButton();
+      return;
+    }
+    
+    // Legacy IE support
+    if (navigator.msSaveOrOpenBlob) {
+      navigator.msSaveOrOpenBlob(processedBlob, desiredName);
+      showStatus(`✓ Saved locally as ${desiredName}`, 'success');
+      clearOutputButton();
+      return;
+    }
+
+    // Fallback: auto-download
+    const url = URL.createObjectURL(processedBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = desiredName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showStatus(`✓ Download started as ${desiredName}`, 'success');
+    clearOutputButton();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      // User cancelled - not an error
+      return;
+    }
+    console.error('Save error:', err);
+    showStatus(`Error saving file: ${err.message || err}`, 'error');
+  }
+}
+

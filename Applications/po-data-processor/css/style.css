@@ -23,11 +23,38 @@ body {
   text-align: center;
 }
 
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
 h1 {
   font-size: 1.5rem;
   font-weight: bold;
   color: #333333;
-  margin-bottom: 15px;
+  margin: 0;
+  flex: 1;
+}
+
+.settings-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  transition: background-color 0.2s, transform 0.1s;
+}
+
+.settings-btn:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+  transform: scale(1.1);
+}
+
+.settings-btn:active {
+  transform: scale(0.95);
 }
 
 .privacy-note {
