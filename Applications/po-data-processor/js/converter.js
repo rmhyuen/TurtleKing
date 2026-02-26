@@ -408,7 +408,7 @@ function parseSkuTable(pdfText) {
   // Strategy 2: multi-line blocks (SKU/style/desc on first line, UPC, prices)
   // Also handles inline format where pack letter precedes SKU on same line
   if (items.length === 0) {
-    const colorRegex = /(White|Black|Red|Blue|Green|Yellow|Grey|Gray|Pink|Brown|Purple|Navy|Silver|Gold|Orange|Multi|Ivory|Cream|Beige|Khaki|Tan|Bone|Natural|Royal|Teal|Turquoise|Maroon|Olive|Charcoal|Burgundy|No Color)/i;
+    const colorRegex = /\b(White|Black|Red|Blue|Green|Yellow|Grey|Gray|Pink|Brown|Purple|Navy|Silver|Gold|Orange|Multi Pattern|Multi|Ivory|Cream|Beige|Khaki|Tan|Bone|Natural|Royal|Teal|Turquoise|Maroon|Olive|Charcoal|Burgundy|No Color)\b/i;
 
     for (let i = headerIdx + 1; i < lines.length; i++) {
       const line = lines[i];
@@ -469,6 +469,22 @@ function parseSkuTable(pdfText) {
             if (wordSizeMatch) {
               sizeDesc = wordSizeMatch[1].trim();
               working = working.slice(wordSizeMatch[0].length).trim();
+            }
+          }
+          
+          // Fallback: if size not found at start, search deeper for size+packqty pattern
+          // Handles multi-word colors (e.g. "Green Multi") or unrecognized colors (e.g. "WHITEWASH")
+          if (!sizeDesc) {
+            const deepSizeMatch = working.match(/^(.+?)\s+(\.|(\d+X\d+(?:X\d+)?))\s+(\d+\.?\d*)\s+/);
+            if (deepSizeMatch) {
+              const packNum = parseFloat(deepSizeMatch[4]);
+              if (packNum >= 1 && packNum <= 99) {
+                const additionalColor = deepSizeMatch[1].trim();
+                color = color ? (color + ' ' + additionalColor) : additionalColor;
+                sizeDesc = deepSizeMatch[2];
+                packQtyFromLeft = String(Math.round(packNum));
+                working = working.slice(deepSizeMatch[0].length).trim();
+              }
             }
           }
           
@@ -618,6 +634,21 @@ function parseSkuTable(pdfText) {
         if (sizeMatch) {
           sizeDesc = sizeMatch[1];
           remainder = remainder.slice(sizeMatch.index + sizeMatch[1].length);
+        }
+      }
+      
+      // Fallback: search deeper for size+packqty pattern (multi-word/unrecognized colors)
+      if (!sizeDesc && !packQtyFromLine) {
+        const deepMatch = remainder.match(/^(.+?)\s+(\.|(\d+X\d+(?:X\d+)?))\s*(\d{1,2})\.(.*)$/);
+        if (deepMatch) {
+          const packNum = parseInt(deepMatch[4], 10);
+          if (packNum >= 1 && packNum <= 99) {
+            const additionalColor = deepMatch[1].trim();
+            color = color ? (color + ' ' + additionalColor) : additionalColor;
+            sizeDesc = deepMatch[2];
+            packQtyFromLine = deepMatch[4];
+            remainder = deepMatch[5];
+          }
         }
       }
       description = remainder.replace(/^[\.\-\s]+/, '').trim();
@@ -788,7 +819,7 @@ function parseSkuTable(pdfText) {
 
   // Strategy 3: single-line compressed rows
   {
-    const colorRegex = /(White|Black|Red|Blue|Green|Yellow|Grey|Gray|Pink|Brown|Purple|Navy|Silver|Gold|Orange|Multi|Ivory|Cream|Beige|Khaki|Tan|Bone|Natural|Royal|Teal|Turquoise|Maroon|Olive|Charcoal|Burgundy|No Color)/i;
+    const colorRegex = /\b(White|Black|Red|Blue|Green|Yellow|Grey|Gray|Pink|Brown|Purple|Navy|Silver|Gold|Orange|Multi Pattern|Multi|Ivory|Cream|Beige|Khaki|Tan|Bone|Natural|Royal|Teal|Turquoise|Maroon|Olive|Charcoal|Burgundy|No Color)\b/i;
 
     const existingSkus = new Set(items.map(item => item.SKU));
 
@@ -816,6 +847,22 @@ function parseSkuTable(pdfText) {
       if (sizeMatch) {
         sizeDesc = sizeMatch[1];
         working = working.slice(sizeMatch.index + sizeMatch[1].length).trim();
+      }
+      
+      // Fallback: if size not found at start, search deeper for size+packqty pattern
+      // Handles multi-word colors or unrecognized colors
+      if (!sizeDesc) {
+        const deepSizeMatch = working.match(/^(.+?)\s+(\.|(\d+X\d+(?:X\d+)?))\s+(\d+\.?\d*)\s+/);
+        if (deepSizeMatch) {
+          const packNum = parseFloat(deepSizeMatch[4]);
+          if (packNum >= 1 && packNum <= 99) {
+            const additionalColor = deepSizeMatch[1].trim();
+            color = color ? (color + ' ' + additionalColor) : additionalColor;
+            sizeDesc = deepSizeMatch[2];
+            packQtyFromLeft = String(Math.round(packNum));
+            working = working.slice(deepSizeMatch[0].length).trim();
+          }
+        }
       }
       
       // Check for Pack Qty (decimal like 3.0 or small integer 1-99) before description
@@ -930,7 +977,7 @@ function parseSkuTable(pdfText) {
 
   // Strategy 4: Multi-line format (SKU on one line, prices on later line)
   {
-    const colorRegex = /(White|Black|Red|Blue|Green|Yellow|Grey|Gray|Pink|Brown|Purple|Navy|Silver|Gold|Orange|Multi|Ivory|Cream|Beige|Khaki|Tan|Bone|Natural|Royal|Teal|Turquoise|Maroon|Olive|Charcoal|Burgundy|No Color)/i;
+    const colorRegex = /\b(White|Black|Red|Blue|Green|Yellow|Grey|Gray|Pink|Brown|Purple|Navy|Silver|Gold|Orange|Multi Pattern|Multi|Ivory|Cream|Beige|Khaki|Tan|Bone|Natural|Royal|Teal|Turquoise|Maroon|Olive|Charcoal|Burgundy|No Color)\b/i;
     
     const existingSkus = new Set(items.map(item => item.SKU));
 
@@ -1006,6 +1053,21 @@ function parseSkuTable(pdfText) {
         if (sizeMatch) {
           sizeDesc = sizeMatch[1];
           afterSku = afterSku.slice(sizeMatch[0].length).trim();
+        }
+      }
+      
+      // Fallback: search deeper for size+packqty pattern (multi-word/unrecognized colors)
+      if (!sizeDesc && !packQtyFromLine) {
+        const deepMatch = afterSku.match(/^(.+?)\s+(\.|(\d+X\d+(?:X\d+)?))\s*(\d{1,2})\.(.*)$/);
+        if (deepMatch) {
+          const packNum = parseInt(deepMatch[4], 10);
+          if (packNum >= 1 && packNum <= 99) {
+            const additionalColor = deepMatch[1].trim();
+            color = color ? (color + ' ' + additionalColor) : additionalColor;
+            sizeDesc = deepMatch[2];
+            packQtyFromLine = deepMatch[4];
+            afterSku = deepMatch[5].trim();
+          }
         }
       }
       
