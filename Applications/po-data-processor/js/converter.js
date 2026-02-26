@@ -81,6 +81,7 @@ async function getPoMetadata(text) {
     'PO #': '',
     'DEPT #': '',
     'STORE #': '',
+    'DC': '',
     'STATE': '',
     'ORDER DATE': '',
     'SHIP DATE': '',
@@ -204,6 +205,23 @@ async function getPoMetadata(text) {
     const match = allText.match(pattern);
     if (match) {
       metadata['STORE #'] = parseInt(match[1]);
+      break;
+    }
+  }
+
+  // Extract DC directly from PO text
+  const dcPatterns = [
+    /\b([A-Z]{2})\s+(?:LOGISTICS\s+)?(?:DIST(?:RIBUTION)?\s*)?(?:SUPPORT\s*)?(?:CENTER|CTR)\s*#?\s*\d*\b/i,
+    /(?:DIST(?:RIBUTION)?|SUPPORT)\s*(?:CENTER|CTR)\s*#?\s*\d+\s*[-,:]?\s*([A-Z]{2})\b/i,
+    /(?:DIST(?:RIBUTION)?|SUPPORT)\s*(?:CENTER|CTR)\s*[:#]?\s*([A-Z]{2})\b/i,
+    /(?:DIST(?:RIBUTION)?\s*(?:CENTER|CTR)|SUPPORT\s*(?:CENTER|CTR))\s*#?\s*\d+\b[\s\S]{0,120}?,\s*([A-Z]{2})\b/i,
+    /\bDC\s*[:#-]?\s*([A-Z]{2})\b/i
+  ];
+
+  for (const pattern of dcPatterns) {
+    const match = allText.match(pattern);
+    if (match) {
+      metadata['DC'] = match[1].toUpperCase();
       break;
     }
   }
@@ -1171,7 +1189,7 @@ function parseSkuTable(pdfText) {
 /**
  * Convert multiple PDFs to merged Excel
  */
-async function convertMultiplePdfsToExcel(files) {
+async function convertMultiplePdfsToExcel(files, options = {}) {
   const allRecords = [];
   let firstMetadata = null;
   
@@ -1188,9 +1206,10 @@ async function convertMultiplePdfsToExcel(files) {
       
       const skuItems = parseSkuTable(text);
       
-      const records = skuItems.map(item => ({
+      const records = skuItems.map((item, idx) => ({
         ...metadata,
         ...item,
+        'Line': idx + 1,
         'SourceFile': file.name
       }));
       
@@ -1304,8 +1323,8 @@ async function convertMultiplePdfsToExcel(files) {
       // Row 5: Dept#
       if (record['DEPT #']) ws.getCell(5, col).value = record['DEPT #'];
       
-      // Row 6: DC/State
-      if (record['STATE']) ws.getCell(6, col).value = record['STATE'];
+      // Row 6: DC
+      if (record['DC']) ws.getCell(6, col).value = record['DC'];
       
       // Row 7: Store#
       if (record['STORE #']) ws.getCell(7, col).value = record['STORE #'];
@@ -1396,6 +1415,13 @@ async function convertMultiplePdfsToExcel(files) {
   ws.getColumn(6).width = 10;
   ws.getColumn(7).width = 10;
   
+  if (options && options.includeRecords) {
+    return {
+      workbook,
+      records: allRecords
+    };
+  }
+
   return workbook;
 }
 

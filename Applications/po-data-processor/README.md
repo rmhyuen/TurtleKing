@@ -34,6 +34,19 @@ A 100% client-side web application for processing Purchase Order PDFs and mergin
 - Optionally saves a copy locally as well
 - Automatically adjusts formulas for new columns
 
+### 3. Import & Process Customer and Vendor Data (Combined Button)
+- Uses the combined workflow button to run customer processing + vendor merge in one run
+- After successful merge upload, automatically updates the running PO list workbook:
+  - Target file: `CustomerData/Beals/Processed/PO#List.xlsx`
+  - Behavior: append-only (no automatic de-duplication yet)
+  - Append start row: row 10
+  - Columns populated: `B:W`
+    - `B`: PO #
+    - `C:Q`: PO/customer line fields + audit fields
+    - `R:V`: vendor fields
+    - `W`: source file
+- Customer-only and vendor-only buttons do **not** update `PO#List.xlsx`
+
 ## Usage
 
 ### Option 1: GitHub Pages (Recommended)
@@ -93,8 +106,9 @@ CustomerData/
 └── Beals/
     ├── New/              (Source folder for input PDFs)
     └── Processed/
-        ├── CustomerDataOnly/        (Step 1 auto-upload destination)
-        └── CustomerAndVendorData/   (Step 2 auto-upload destination)
+    ├── PO#List.xlsx              (Running append-only PO list workbook)
+    ├── CustomerDataOnly/         (Step 1 auto-upload destination)
+    └── CustomerAndVendorData/    (Step 2 auto-upload destination)
 VendorData/
     (Place vendor Excel/CSV file here - latest file will be auto-fetched)
 ```

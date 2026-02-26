@@ -53,6 +53,11 @@ const FOLDER_STRUCTURE = {
   vendorProcessed: ['VendorData', 'Processed']
 };
 
+const PO_LIST_CONFIG = {
+  folderPath: ['CustomerData', 'Beals', 'Processed'],
+  fileName: 'PO#List.xlsx'
+};
+
 /**
  * Main web app endpoint
  */
@@ -74,6 +79,8 @@ function doGet(e) {
       return downloadVendorFile();
     } else if (action === 'download-customer-data-only') {
       return downloadLatestCustomerDataOnly();
+    } else if (action === 'download-po-list') {
+      return downloadPoListWorkbook();
     } else if (action === 'download') {
       return downloadFile(e.parameter.fileId);
     } else if (action === 'archive-pdfs') {
@@ -100,6 +107,8 @@ function doPost(e) {
       return uploadProcessedCustomerData(e);
     } else if (action === 'upload-merged-customer-vendor-data') {
       return uploadMergedCustomerVendorData(e);
+    } else if (action === 'upload-po-list') {
+      return uploadPoListWorkbook(e);
     } else {
       return error('Unknown POST action: ' + action);
     }
@@ -496,6 +505,85 @@ function uploadProcessedCustomerData(e) {
     
   } catch (err) {
     return error('Error uploading processed data: ' + err.toString());
+  }
+}
+
+/**
+ * Download PO running list workbook by exact filename from Processed folder
+ */
+function downloadPoListWorkbook() {
+  try {
+    const folder = navigateToFolder(PO_LIST_CONFIG.folderPath);
+    const files = folder.getFilesByName(PO_LIST_CONFIG.fileName);
+
+    if (!files.hasNext()) {
+      return error(`PO list template not found: ${PO_LIST_CONFIG.fileName} in ${PO_LIST_CONFIG.folderPath.join('/')}`);
+    }
+
+    const file = files.next();
+    const blob = file.getBlob();
+    const base64 = Utilities.base64Encode(blob.getBytes());
+
+    return success({
+      fileName: file.getName(),
+      mimeType: blob.getContentType(),
+      data: base64,
+      fileId: file.getId(),
+      folder: PO_LIST_CONFIG.folderPath.join('/')
+    });
+  } catch (err) {
+    return error('Error downloading PO list workbook: ' + err.toString());
+  }
+}
+
+/**
+ * Upload updated PO running list workbook (overwrite by exact filename)
+ */
+function uploadPoListWorkbook(e) {
+  try {
+    let fileData = null;
+    const fileName = PO_LIST_CONFIG.fileName;
+
+    if (e.parameter.data) {
+      fileData = e.parameter.data;
+    } else if (e.postData && e.postData.contents) {
+      fileData = e.postData.contents;
+    }
+
+    if (!fileData) {
+      return error('No PO list workbook data provided');
+    }
+
+    if (fileData.indexOf('base64,') > -1) {
+      fileData = fileData.split('base64,')[1];
+    }
+
+    const targetFolder = navigateToFolder(PO_LIST_CONFIG.folderPath);
+
+    // Keep only one canonical file by moving existing matches to trash
+    const existingFiles = targetFolder.getFilesByName(fileName);
+    while (existingFiles.hasNext()) {
+      existingFiles.next().setTrashed(true);
+    }
+
+    const decodedData = Utilities.base64Decode(fileData);
+    const blob = Utilities.newBlob(
+      decodedData,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      fileName
+    );
+
+    const file = targetFolder.createFile(blob);
+
+    return success({
+      message: 'PO list workbook uploaded successfully',
+      fileName: fileName,
+      fileId: file.getId(),
+      folder: PO_LIST_CONFIG.folderPath.join('/'),
+      driveUrl: 'https://drive.google.com/drive/folders/' + targetFolder.getId()
+    });
+  } catch (err) {
+    return error('Error uploading PO list workbook: ' + err.toString());
   }
 }
 

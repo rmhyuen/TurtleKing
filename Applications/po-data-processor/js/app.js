@@ -18,6 +18,13 @@ let processedBlob = null;
 let processedFileName = 'merged-output.xlsx';
 let currentTimestamp = '';
 
+const PO_LIST_CONFIG = {
+  fileName: 'PO#List.xlsx',
+  startRow: 10,
+  startColumn: 2, // Column B
+  endColumn: 23   // Column W
+};
+
 /**
  * Generate timestamp in YYYYMMDD_HHMMSS format
  */
@@ -281,11 +288,19 @@ if (fileInput) {
   const isCombined = window.isCombinedWorkflow;
   let customerDataBlob = null;
   let customerDataFileName = null;
+  let poLineRecords = [];
   const fileCount = files.length;
   
   try {
     // Use client-side converter (no server)
-    const workbook = await window.POConverter.convertMultiplePdfsToExcel(files);
+    let workbook;
+    if (isCombined) {
+      const conversionResult = await window.POConverter.convertMultiplePdfsToExcel(files, { includeRecords: true });
+      workbook = conversionResult.workbook;
+      poLineRecords = conversionResult.records || [];
+    } else {
+      workbook = await window.POConverter.convertMultiplePdfsToExcel(files);
+    }
     
     // Convert workbook to blob
     const buffer = await workbook.xlsx.writeBuffer();
@@ -360,8 +375,18 @@ if (fileInput) {
           showStatus('Error: Could not upload merged data, but customer data was uploaded successfully.', 'error');
           return;
         }
+
+        showStatus('✓ Merged data uploaded. Appending rows to PO#List.xlsx...', 'loading');
+        try {
+          const poListResult = await appendRowsToPoList(poLineRecords, vendorBuffer, vendorData.name, currentTimestamp);
+          console.log(`PO#List append complete. Rows appended: ${poListResult.appendedRows}`);
+        } catch (poListErr) {
+          console.error('PO#List append error:', poListErr);
+          showStatus(`Error updating PO#List.xlsx: ${poListErr.message}`, 'error');
+          return;
+        }
         
-        showStatus(`✓ Both customer and vendor data uploaded successfully to Google Drive.`, 'success');
+        showStatus(`✓ Customer + vendor data uploaded and PO#List.xlsx updated successfully.`, 'success');
         resultLink.innerHTML = `
           <button id="download-btn" style="
             background: #1f6feb;
@@ -702,6 +727,347 @@ async function uploadToGoogleDrive(blob, timestamp, isMerged, fileCount, parentF
     return false;
   }
 }
+
+/**
+ * Fetch PO#List workbook from Google Drive
+ */
+async function fetchPoListWorkbookFromDrive() {
+  try {
+    const response = await fetch(`${CONFIG.scriptUrl}?action=download-po-list&apiKey=${CONFIG.apiKey}`);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to fetch PO#List workbook');
+    }
+
+    const data = result.data;
+    const binaryString = atob(data.data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    return new File([blob], data.fileName || PO_LIST_CONFIG.fileName, { type: blob.type });
+  } catch (err) {
+    throw new Error(`Could not fetch PO#List.xlsx from CustomerData/Beals/Processed. ${err.message}`);
+  }
+}
+
+/**
+ * Upload updated PO#List workbook to Google Drive
+ */
+async function uploadPoListWorkbookToDrive(blob) {
+  try {
+    const base64Data = await blobToBase64(blob);
+
+    return await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const response = JSON.parse(xhr.responseText || '{}');
+          if (response.success) {
+            resolve(true);
+          } else {
+            reject(new Error(response.error || 'PO#List upload failed'));
+          }
+        } else {
+          reject(new Error(`Upload failed: ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = function() {
+        reject(new Error('PO#List upload request failed'));
+      };
+
+      xhr.open('POST', `${CONFIG.scriptUrl}?apiKey=${CONFIG.apiKey}`, true);
+
+      const payload = new FormData();
+      payload.append('action', 'upload-po-list');
+      payload.append('data', base64Data);
+
+      xhr.send(payload);
+    });
+  } catch (err) {
+    throw new Error(`Could not upload updated PO#List.xlsx. ${err.message}`);
+  }
+}
+
+/**
+ * Append combined workflow rows to PO#List workbook
+ */
+async function appendRowsToPoList(poLineRecords, vendorArrayBuffer, vendorFileName, appRunTimestamp) {
+  if (!Array.isArray(poLineRecords) || poLineRecords.length === 0) {
+    throw new Error('No PO line records were generated for append');
+  }
+
+  const vendorLookup = await buildVendorLookup(vendorArrayBuffer, vendorFileName);
+  const appendRows = buildPoListRows(poLineRecords, vendorLookup, appRunTimestamp);
+
+  if (appendRows.length === 0) {
+    return { appendedRows: 0 };
+  }
+
+  const poListFile = await fetchPoListWorkbookFromDrive();
+  const updatedBlob = await appendRowsToWorkbook(poListFile, appendRows);
+  await uploadPoListWorkbookToDrive(updatedBlob);
+
+  return { appendedRows: appendRows.length };
+}
+
+/**
+ * Build vendor lookup keyed by Item#/MFG STYLE
+ */
+async function buildVendorLookup(vendorArrayBuffer, vendorFileName) {
+  const vendorLookup = {};
+  const isCSV = (vendorFileName || '').toLowerCase().endsWith('.csv');
+
+  if (isCSV) {
+    const content = new TextDecoder().decode(vendorArrayBuffer);
+    const { rows } = window.POConverter.parseCSV(content);
+
+    for (const row of rows) {
+      const itemNum = (row['Item#'] || '').toString().trim();
+      const whsNum = parseInt(row['WHS#'], 10) || 0;
+
+      if (itemNum && !vendorLookup[itemNum] && whsNum === 1) {
+        const baseCost = parseCurrencyToNumber(row['Base Cost']);
+        vendorLookup[itemNum] = {
+          vend: (row['Vend#'] || '').toString().trim(),
+          baseCost,
+          boxCase: (row['Box/Case'] || '').toString().trim(),
+          unitCase: (row['Unit/Case'] || '').toString().trim()
+        };
+      }
+    }
+  } else {
+    const workbook = new window.ExcelJS.Workbook();
+    await workbook.xlsx.load(vendorArrayBuffer);
+
+    const worksheet = workbook.worksheets[0];
+    if (!worksheet) return vendorLookup;
+
+    const headerRow = worksheet.getRow(1);
+    const cols = {};
+    headerRow.eachCell((cell, num) => {
+      const val = (cell.value || '').toString().trim();
+      if (val === 'Item#') cols.item = num;
+      else if (val === 'WHS#') cols.whs = num;
+      else if (val === 'Vend#') cols.vend = num;
+      else if (val === 'Base Cost') cols.baseCost = num;
+      else if (val === 'Unit/Case') cols.unitCase = num;
+      else if (val === 'Box/Case') cols.boxCase = num;
+    });
+
+    if (!cols.item || !cols.whs) {
+      return vendorLookup;
+    }
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber === 1) return;
+
+      const itemNum = (row.getCell(cols.item).value || '').toString().trim();
+      const whsNum = parseInt(row.getCell(cols.whs).value, 10) || 0;
+
+      if (itemNum && !vendorLookup[itemNum] && whsNum === 1) {
+        vendorLookup[itemNum] = {
+          vend: (row.getCell(cols.vend).value || '').toString().trim(),
+          baseCost: parseCurrencyToNumber(row.getCell(cols.baseCost).value),
+          boxCase: cols.boxCase ? (row.getCell(cols.boxCase).value || '').toString().trim() : '',
+          unitCase: cols.unitCase ? (row.getCell(cols.unitCase).value || '').toString().trim() : ''
+        };
+      }
+    });
+  }
+
+  return vendorLookup;
+}
+
+/**
+ * Map parsed records to PO#List column order B:W
+ */
+function buildPoListRows(records, vendorLookup, appRunTimestamp) {
+  const rows = [];
+
+  for (const record of records) {
+    const poNumber = (record['PO #'] || '').toString().trim();
+    const sku = (record['SKU'] || '').toString().trim();
+    const mfgStyle = (record['MFG Style'] || '').toString().trim();
+
+    if (!poNumber && !sku && !mfgStyle) {
+      continue;
+    }
+
+    const ttlUnits = parseInt(record['Qty'], 10) || 0;
+    const costUnit = parseCurrencyToNumber(record['Cost/Unit']);
+    const retail = parseCurrencyToNumber(record['Retail']);
+    const packQty = parseInt(record['Pack Qty.'], 10) || '';
+    const ttlAmt = costUnit !== null ? costUnit * ttlUnits : '';
+
+    const vendorData = vendorLookup[mfgStyle] || {};
+    const baseCost = typeof vendorData.baseCost === 'number' ? vendorData.baseCost : null;
+    const ttlCost = baseCost !== null ? baseCost * ttlUnits : '';
+
+    rows.push([
+      poNumber,
+      (record['ORDER DATE'] || '').toString().trim(),
+      (record['SHIP DATE'] || '').toString().trim(),
+      (record['CANCEL DATE'] || '').toString().trim(),
+      record['DEPT #'] || '',
+      (record['DC'] || '').toString().trim(),
+      record['STORE #'] || '',
+      sku,
+      mfgStyle,
+      costUnit !== null ? costUnit : '',
+      retail !== null ? retail : '',
+      packQty,
+      ttlUnits,
+      ttlAmt,
+      record['Line'] || '',
+      appRunTimestamp,
+      vendorData.vend || '',
+      baseCost !== null ? baseCost : '',
+      vendorData.boxCase || '',
+      vendorData.unitCase || '',
+      ttlCost,
+      (record['SourceFile'] || '').toString().trim()
+    ]);
+  }
+
+  return rows;
+}
+
+/**
+ * Append rows to first worksheet in PO#List workbook
+ */
+async function appendRowsToWorkbook(poListFile, rowsToAppend) {
+  const workbook = new window.ExcelJS.Workbook();
+  const arrayBuffer = await poListFile.arrayBuffer();
+  await workbook.xlsx.load(arrayBuffer);
+
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
+    throw new Error('PO#List workbook has no worksheet');
+  }
+
+  let nextRow = PO_LIST_CONFIG.startRow;
+  const maxRow = Math.max(worksheet.rowCount, PO_LIST_CONFIG.startRow);
+  for (let rowNum = PO_LIST_CONFIG.startRow; rowNum <= maxRow; rowNum++) {
+    let hasData = false;
+    for (let col = PO_LIST_CONFIG.startColumn; col <= PO_LIST_CONFIG.endColumn; col++) {
+      const cellValue = worksheet.getCell(rowNum, col).value;
+      if (cellValue !== null && cellValue !== undefined && String(cellValue).trim() !== '') {
+        hasData = true;
+        break;
+      }
+    }
+    if (!hasData) {
+      nextRow = rowNum;
+      break;
+    }
+    nextRow = rowNum + 1;
+  }
+
+  for (const rowValues of rowsToAppend) {
+    rowValues.forEach((value, idx) => {
+      worksheet.getCell(nextRow, PO_LIST_CONFIG.startColumn + idx).value = value;
+    });
+
+    // Currency formats for K, L, O, S, V
+    worksheet.getCell(nextRow, 11).numFmt = '$#,##0.00';
+    worksheet.getCell(nextRow, 12).numFmt = '$#,##0.00';
+    worksheet.getCell(nextRow, 15).numFmt = '$#,##0.00';
+    worksheet.getCell(nextRow, 19).numFmt = '$#,##0.00';
+    worksheet.getCell(nextRow, 22).numFmt = '$#,##0.00';
+
+    nextRow++;
+  }
+
+  // Sort all populated data rows (B:W) by PO# in column B
+  const dataRows = [];
+  const lastAppendedRow = Math.max(PO_LIST_CONFIG.startRow, nextRow - 1);
+  for (let rowNum = PO_LIST_CONFIG.startRow; rowNum <= lastAppendedRow; rowNum++) {
+    const rowValues = [];
+    let hasData = false;
+    for (let col = PO_LIST_CONFIG.startColumn; col <= PO_LIST_CONFIG.endColumn; col++) {
+      const cellValue = worksheet.getCell(rowNum, col).value;
+      rowValues.push(cellValue);
+      if (cellValue !== null && cellValue !== undefined && String(cellValue).trim() !== '') {
+        hasData = true;
+      }
+    }
+    if (hasData) {
+      dataRows.push(rowValues);
+    }
+  }
+
+  dataRows.sort((a, b) => {
+    const poA = (a[0] ?? '').toString().trim();
+    const poB = (b[0] ?? '').toString().trim();
+
+    const numA = parseInt(poA, 10);
+    const numB = parseInt(poB, 10);
+    const aIsNum = Number.isFinite(numA);
+    const bIsNum = Number.isFinite(numB);
+
+    if (aIsNum && bIsNum) {
+      return numA - numB;
+    }
+    if (aIsNum && !bIsNum) return -1;
+    if (!aIsNum && bIsNum) return 1;
+    return poA.localeCompare(poB);
+  });
+
+  // Clear existing B:W data region, then rewrite sorted rows from row 10
+  for (let rowNum = PO_LIST_CONFIG.startRow; rowNum <= lastAppendedRow; rowNum++) {
+    for (let col = PO_LIST_CONFIG.startColumn; col <= PO_LIST_CONFIG.endColumn; col++) {
+      worksheet.getCell(rowNum, col).value = null;
+    }
+  }
+
+  let writeRow = PO_LIST_CONFIG.startRow;
+  for (const rowValues of dataRows) {
+    rowValues.forEach((value, idx) => {
+      worksheet.getCell(writeRow, PO_LIST_CONFIG.startColumn + idx).value = value;
+    });
+
+    // Currency formats for K, L, O, S, V
+    worksheet.getCell(writeRow, 11).numFmt = '$#,##0.00';
+    worksheet.getCell(writeRow, 12).numFmt = '$#,##0.00';
+    worksheet.getCell(writeRow, 15).numFmt = '$#,##0.00';
+    worksheet.getCell(writeRow, 19).numFmt = '$#,##0.00';
+    worksheet.getCell(writeRow, 22).numFmt = '$#,##0.00';
+
+    writeRow++;
+  }
+
+  const lastDataRow = Math.max(PO_LIST_CONFIG.startRow, writeRow - 1);
+
+  // Row 8 summary formulas for N (TTL UNITS), O (TTL AMT), and V (TTL COST)
+  worksheet.getCell(8, 14).value = { formula: `SUM(N${PO_LIST_CONFIG.startRow}:N${lastDataRow})` };
+  worksheet.getCell(8, 15).value = { formula: `SUM(O${PO_LIST_CONFIG.startRow}:O${lastDataRow})` };
+  worksheet.getCell(8, 22).value = { formula: `SUM(V${PO_LIST_CONFIG.startRow}:V${lastDataRow})` };
+  worksheet.getCell(8, 15).numFmt = '$#,##0.00';
+  worksheet.getCell(8, 22).numFmt = '$#,##0.00';
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+}
+
+function parseCurrencyToNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return value;
+  const parsed = parseFloat(String(value).replace(/[$,]/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 /**
  * Convert blob to Base64
  */
