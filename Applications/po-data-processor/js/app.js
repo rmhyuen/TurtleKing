@@ -76,8 +76,12 @@ const PathMemory = {
 /**
  * Show status message
  */
-function showStatus(message, type = 'info') {
-  statusEl.textContent = message;
+function showStatus(message, type = 'info', useHTML = false) {
+  if (useHTML) {
+    statusEl.innerHTML = message;
+  } else {
+    statusEl.textContent = message;
+  }
   statusEl.classList.remove('info', 'error', 'success', 'loading');
   statusEl.classList.add('show', type);
 }
@@ -377,16 +381,28 @@ if (fileInput) {
         }
 
         showStatus('✓ Merged data uploaded. Appending rows to PO#List.xlsx...', 'loading');
+        let poListResult;
         try {
-          const poListResult = await appendRowsToPoList(poLineRecords, vendorBuffer, vendorData.name, currentTimestamp);
-          console.log(`PO#List append complete. Rows appended: ${poListResult.appendedRows}`);
+          poListResult = await appendRowsToPoList(poLineRecords, vendorBuffer, vendorData.name, currentTimestamp);
+          console.log(`PO#List append complete. Rows appended: ${poListResult.appendedRows}, skipped (duplicates): ${poListResult.skippedRows}`);
         } catch (poListErr) {
           console.error('PO#List append error:', poListErr);
           showStatus(`Error updating PO#List.xlsx: ${poListErr.message}`, 'error');
           return;
         }
         
-        showStatus(`✓ Customer + vendor data uploaded and PO#List.xlsx updated successfully.`, 'success');
+        let poListMsg = `✓ Complete — ${poListResult.appendedRows + poListResult.skippedRows} row(s) in batch, ${poListResult.appendedRows} added to PO#List.xlsx`;
+        let useHTML = false;
+        if (poListResult.skippedRows > 0) {
+          poListMsg += `, ${poListResult.skippedRows} skipped (already processed)`;
+          if (poListResult.skippedSourceList && poListResult.skippedSourceList.length > 0) {
+            const srcItems = poListResult.skippedSourceList.map(s => s.replace(/</g, '&lt;').replace(/>/g, '&gt;'));
+            poListMsg += `:<br>— ${srcItems.join('<br>— ')}`;
+            useHTML = true;
+          }
+        }
+        poListMsg += '.';
+        showStatus(poListMsg, 'success', useHTML);
         resultLink.innerHTML = `
           <button id="download-btn" style="
             background: #1f6feb;
@@ -810,14 +826,15 @@ async function appendRowsToPoList(poLineRecords, vendorArrayBuffer, vendorFileNa
   const appendRows = buildPoListRows(poLineRecords, vendorLookup, appRunTimestamp);
 
   if (appendRows.length === 0) {
-    return { appendedRows: 0 };
+    return { appendedRows: 0, skippedRows: 0 };
   }
 
   const poListFile = await fetchPoListWorkbookFromDrive();
-  const updatedBlob = await appendRowsToWorkbook(poListFile, appendRows);
-  await uploadPoListWorkbookToDrive(updatedBlob);
+  const result = await appendRowsToWorkbook(poListFile, appendRows);
 
-  return { appendedRows: appendRows.length };
+  await uploadPoListWorkbookToDrive(result.blob);
+
+  return { appendedRows: result.appendedRows, skippedRows: result.skippedRows, skippedPOList: result.skippedPOList || [], skippedSourceList: result.skippedSourceList || [] };
 }
 
 /**
@@ -973,6 +990,54 @@ async function appendRowsToWorkbook(poListFile, rowsToAppend) {
     nextRow = rowNum + 1;
   }
 
+  // --- Duplicate check: skip rows whose SourceFile already exists in PO#List ---
+  // SourceFile is in column W (23)
+  const srcColIndex = PO_LIST_CONFIG.endColumn;         // Column W (23)
+
+  const existingSources = new Set();
+  for (let rowNum = PO_LIST_CONFIG.startRow; rowNum < nextRow; rowNum++) {
+    const srcVal = (worksheet.getCell(rowNum, srcColIndex).value ?? '').toString().trim();
+    if (srcVal) {
+      existingSources.add(srcVal);
+    }
+  }
+
+  const originalCount = rowsToAppend.length;
+  const skippedPOs = new Set();
+  const skippedSources = new Set();
+  rowsToAppend = rowsToAppend.filter(row => {
+    const srcVal = (row[21] ?? '').toString().trim();      // SourceFile
+    if (existingSources.has(srcVal)) {
+      const poVal = (row[0] ?? '').toString().trim();      // PO#
+      if (poVal) skippedPOs.add(poVal);
+      if (srcVal) skippedSources.add(srcVal);
+      return false;
+    }
+    return true;
+  });
+
+  const skippedCount = originalCount - rowsToAppend.length;
+  const skippedPOList = Array.from(skippedPOs).sort();
+  const skippedSourceList = Array.from(skippedSources).sort();
+  if (skippedCount > 0) {
+    console.log(`Duplicate check: skipped ${skippedCount} row(s) already in PO#List.xlsx. POs skipped: ${skippedPOList.join(', ')}. Sources: ${skippedSourceList.join(', ')}`);
+  }
+
+  if (rowsToAppend.length === 0) {
+    console.log('All rows already exist in PO#List.xlsx — nothing to append.');
+    const buffer = await workbook.xlsx.writeBuffer();
+    return {
+      blob: new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      }),
+      appendedRows: 0,
+      skippedRows: skippedCount,
+      skippedPOList,
+      skippedSourceList
+    };
+  }
+  // --- End duplicate check ---
+
   for (const rowValues of rowsToAppend) {
     rowValues.forEach((value, idx) => {
       worksheet.getCell(nextRow, PO_LIST_CONFIG.startColumn + idx).value = value;
@@ -1056,9 +1121,15 @@ async function appendRowsToWorkbook(poListFile, rowsToAppend) {
   worksheet.getCell(8, 22).numFmt = '$#,##0.00';
 
   const buffer = await workbook.xlsx.writeBuffer();
-  return new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  });
+  return {
+    blob: new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    }),
+    appendedRows: rowsToAppend.length,
+    skippedRows: skippedCount,
+    skippedPOList,
+    skippedSourceList
+  };
 }
 
 function parseCurrencyToNumber(value) {
